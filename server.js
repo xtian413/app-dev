@@ -1,32 +1,92 @@
-const http = require('http');
-const fs = require('fs');
+// Import necessary modules
+const express = require('express');
 const path = require('path');
-const mime = require('mime-types');
+const multer = require('multer');
+const fs = require('fs');
 
+// Create the Express application
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Create the 'public' and 'uploads' directories if they don't exist
 const publicDir = path.join(__dirname, 'public');
-const server = http.createServer((req, res) => {
-    // If the URL is just '/', serve index.html from the public directory.
-    // Otherwise, serve the requested file from the public directory.
-    let filePath = path.join(publicDir, req.url === '/' ? 'index.html' : req.url);
+const uploadsDir = path.join(__dirname, 'public', 'uploads');
 
-    fs.readFile(filePath, (err, content) => {
-        if (err) {
-            // Check for file not found error
-            if (err.code === 'ENOENT') {
-                res.writeHead(404, { 'Content-Type': 'text/html' });
-                res.end('<h1>404 - File Not Found</h1>', 'utf8');
-            } else {
-                // Handle other server errors
-                res.writeHead(500);
-                res.end(`Server Error: ${err.code}`);
-            }
-        } else {
-            // If the file is found, send it with the correct content type.
-            res.writeHead(200, { 'Content-Type': mime.lookup(filePath) });
-            res.end(content, 'utf8');
-        }
-    });
+if (!fs.existsSync(publicDir)) {
+    fs.mkdirSync(publicDir);
+}
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir);
+}
+
+// Configure multer storage
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        // Specify the directory where uploaded files will be stored
+        cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+        // Use the original filename with a timestamp to prevent duplicates
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + '-' + file.originalname);
+    }
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Define a file filter function to validate file types
+const fileFilter = (req, file, cb) => {
+    // Allowed file types based on the HTML description
+    const allowedMimeTypes = [
+        'image/png',
+        'image/jpeg',
+        'image/gif',
+        'application/pdf',
+        'application/msword', // .doc
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // .docx
+    ];
+
+    // Check if the uploaded file's MIME type is in the allowed list
+    if (allowedMimeTypes.includes(file.mimetype)) {
+        cb(null, true); // Accept the file
+    } else {
+        // Reject the file and provide a helpful error message
+        cb(new Error('Invalid file type. Only PNG, JPG, GIF, PDF, DOC, and DOCX are allowed.'), false);
+    }
+};
+
+// Configure the multer middleware with the storage and file filter
+const upload = multer({
+    storage: storage,
+    fileFilter: fileFilter,
+    limits: {
+        fileSize: 10 * 1024 * 1024 // 10MB file size limit
+    }
+});
+
+// Serve static files from the 'public' directory
+app.use(express.static(publicDir));
+
+// Handle the file upload POST request
+app.post('/upload', upload.single('uploadedFile'), (req, res, next) => {
+    if (req.file) {
+        console.log(`File uploaded successfully: ${req.file.path}`);
+        res.status(200).send({
+            message: 'File uploaded successfully!',
+            filename: req.file.filename
+        });
+    } else {
+        res.status(400).send({
+            message: 'No file was uploaded.'
+        });
+    }
+}, (error, req, res, next) => {
+    if (error) {
+        res.status(400).send({ message: error.message });
+    } else {
+        next();
+    }
+});
+
+// Start the server
+app.listen(PORT, () => {
+    console.log(`Server is running at http://localhost:${PORT}`);
+});
